@@ -2,3 +2,4 @@ datasets/*.csv
 timeseries
 charts
 forecasts
+__pycache__
