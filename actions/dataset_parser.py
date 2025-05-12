@@ -1,8 +1,13 @@
 import pandas
+import os
 
 class DatasetParser:
 
     datasets_path = "datasets/"
+
+    @staticmethod
+    def fileExists(file_name):
+        return os.path.isfile(DatasetParser.datasets_path+"/"+file_name)
 
     @staticmethod
     def getData(file_name):

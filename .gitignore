@@ -3,3 +3,4 @@ timeseries
 charts
 forecasts
 __pycache__
+.env
