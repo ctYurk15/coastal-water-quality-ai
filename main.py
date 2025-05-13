@@ -1,6 +1,7 @@
 import mysql.connector
 from actions.dataset_parser import *
 from database.dataset import *
+from database.location import *
 from dotenv import load_dotenv
 import os
 
@@ -24,16 +25,28 @@ match action:
     case "new-dataset":
         dataset_name = input("Dataset name (should be in datasets/ folder): ").strip()
         if DatasetParser.fileExists(dataset_name):
-            db_processor = Dataset(db_connection)
+            dataset_processor = Dataset(db_connection)
+            location_processor = Location(db_connection)
 
-            if not db_processor.is_duplicate(dataset_name):
-                dataset_id = db_processor.insert(dataset_name)
-                unique_locations = DatasetParser.getData(dataset_name)
+            if not dataset_processor.is_duplicate(dataset_name):
+                dataset_id = dataset_processor.insert(dataset_name)
+                dataset_data = DatasetParser.getData(dataset_name)
 
-                print(unique_locations.to_string(index=False))
+                for loc in dataset_data["locations"]:
+                    location_processor.insert(loc, dataset_id)
 
             else:
                 print("Dataset with the name `"+dataset_name+"` is already processed")
+        else:
+            print("No dataset found in folder `datasets` with the name `"+dataset_name+"`")
+
+    case "delete-dataset":
+        dataset_name = input("Dataset name (should be in datasets/ folder): ").strip()
+        if DatasetParser.fileExists(dataset_name):
+            dataset_processor = Dataset(db_connection)
+            dataset_processor.delete(dataset_name)
+
+            print("Dataset with the name `"+dataset_name+"` is successfully deleted")
         else:
             print("No dataset found in folder `datasets` with the name `"+dataset_name+"`")
 

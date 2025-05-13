@@ -3,3 +3,12 @@ CREATE TABLE IF NOT EXISTS `datasets`
 	`id` INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL
 )
+
+CREATE TABLE IF NOT EXISTS `locations`
+(
+	`id` INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `dataset_id` INT NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    CONSTRAINT `fk_dataset_locations` FOREIGN KEY (`dataset_id`) REFERENCES `datasets`(`id`)
+    	ON DELETE CASCADE ON UPDATE CASCADE
+)

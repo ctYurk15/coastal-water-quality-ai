@@ -13,11 +13,6 @@ class DatasetParser:
     def getData(file_name):
         df = pandas.read_csv(DatasetParser.datasets_path+"/"+file_name, usecols=["monitoringSiteIdentifier"], low_memory=False)
 
-        counts = (
-            df["monitoringSiteIdentifier"]
-            .value_counts()
-            .reset_index()
-            .rename(columns={"index": "monitoringSiteIdentifier", "monitoringSiteIdentifier": "measurement_count"})
-        )
+        locations = df["monitoringSiteIdentifier"].drop_duplicates().reset_index(drop=True)
 
-        return counts
+        return {"locations": locations}

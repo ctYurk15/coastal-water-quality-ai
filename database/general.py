@@ -44,3 +44,25 @@ class General:
         cursor.close()
 
         return count > 0
+
+    def delete(self, conditions: dict) -> int:
+        """
+        Видаляє записи з таблиці за вказаними умовами.
+        Повертає кількість видалених рядків.
+        """
+        if not conditions:
+            raise ValueError("Deletion requires at least one condition")
+
+        if not set(conditions.keys()).issubset(set(self.columns)):
+            raise ValueError("Invalid columns in deletion conditions")
+
+        cursor = self.connection.cursor()
+        where_clause = " AND ".join([f"{col} = %s" for col in conditions])
+        sql = f"DELETE FROM {self.table_name} WHERE {where_clause}"
+        val_tuple = tuple(conditions[col] for col in conditions)
+
+        cursor.execute(sql, val_tuple)
+        self.connection.commit()
+        deleted = cursor.rowcount
+        cursor.close()
+        return deleted

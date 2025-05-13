@@ -9,4 +9,7 @@ class Dataset (General):
         return super().insert({"name" : name})
 
     def is_duplicate(self, name):
-        return super().insert({"name" : name})
+        return super().is_duplicate({"name" : name})
+
+    def delete(self, name):
+        return super().delete({"name" : name})
