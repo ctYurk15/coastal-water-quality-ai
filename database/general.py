@@ -28,7 +28,7 @@ class General:
         cursor.close()
         return last_id
 
-    def is_duplicate(self, values: dict) -> bool:
+    def exists(self, values: dict) -> bool:
         """
         Перевіряє, чи існує запис з такими ж значеннями, як у переданих полях.
         """
@@ -66,3 +66,19 @@ class General:
         deleted = cursor.rowcount
         cursor.close()
         return deleted
+
+    def get_id(self, values: dict) -> int | None:
+        """
+        Повертає ID запису, який відповідає заданим умовам.
+        Якщо запис не знайдено — повертає None.
+        """
+        cursor = self.connection.cursor()
+        conditions = " AND ".join([f"{col} = %s" for col in values])
+        sql = f"SELECT id FROM {self.table_name} WHERE {conditions} LIMIT 1"
+        val_tuple = tuple(values[col] for col in values)
+
+        cursor.execute(sql, val_tuple)
+        result = cursor.fetchone()
+        cursor.close()
+
+        return result[0] if result else None

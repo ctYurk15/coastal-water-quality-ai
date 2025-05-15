@@ -12,3 +12,20 @@ CREATE TABLE IF NOT EXISTS `locations`
     CONSTRAINT `fk_dataset_locations` FOREIGN KEY (`dataset_id`) REFERENCES `datasets`(`id`)
     	ON DELETE CASCADE ON UPDATE CASCADE
 )
+
+CREATE TABLE IF NOT EXISTS `timeseries`
+(
+    `id` INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `dataset_id` INT NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    FOREIGN KEY (`dataset_id`) REFERENCES `datasets`(`id`) ON DELETE CASCADE
+)
+
+CREATE TABLE  IF NOT EXISTS `timeseries_locations`
+(
+    `timeseries_id` INT NOT NULL,
+    `location_id` INT NOT NULL,
+    PRIMARY KEY (`timeseries_id`, `location_id`),
+    FOREIGN KEY (`timeseries_id`) REFERENCES `timeseries`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`location_id`) REFERENCES `locations`(`id`) ON DELETE CASCADE
+)
