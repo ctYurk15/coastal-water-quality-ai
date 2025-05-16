@@ -2,6 +2,7 @@ import mysql.connector
 from actions.dataset_parser import *
 from database.dataset import *
 from database.location import *
+from database.timeseries import *
 from dotenv import load_dotenv
 import os
 
@@ -28,7 +29,7 @@ match action:
             dataset_processor = Dataset(db_connection)
             location_processor = Location(db_connection)
 
-            if not dataset_processor.existsдя(dataset_name):
+            if not dataset_processor.exists(dataset_name):
                 dataset_id = dataset_processor.insert(dataset_name)
                 dataset_data = DatasetParser.getData(dataset_name)
 
@@ -58,35 +59,69 @@ match action:
         if DatasetParser.fileExists(dataset_name):
             dataset_processor = Dataset(db_connection)
             location_processor = Location(db_connection)
+            timeseries_processor = Timeseries(db_connection)
 
             if dataset_processor.exists(dataset_name):
 
                 dataset_id = dataset_processor.get_id(dataset_name)
+                timeseries_name = input("New timeseries name: ").strip()
 
-                location_names = []
-                location_ids = []
+                if not timeseries_processor.exists(timeseries_name, dataset_id):
 
-                print("Write locations, for which you want to generate timeseries (write empty value to finish)")
+                    timeseries_id = timeseries_processor.insert(timeseries_name, dataset_id)
+                    
+                    location_names = []
+                    location_ids = []
 
-                while True:
-                    name = input("Name: ").strip()
-                    if name == "":
-                        break
+                    print("Write locations, for which you want to generate timeseries (write empty value to finish)")
 
-                    if location_processor.exists(name, dataset_id):
-                        location_names.append(name)
+                    while True:
+                        name = input("Name: ").strip()
+                        if name == "":
+                            break
 
-                        loc_id = location_processor.get_id(name, dataset_id)
-                        if loc_id is not None:
-                            location_ids.append(loc_id)
+                        if location_processor.exists(name, dataset_id):
+                            location_names.append(name)
+
+                            loc_id = location_processor.get_id(name, dataset_id)
+                            if loc_id is not None:
+                                location_ids.append(loc_id)
+                            else:
+                                print(f"Internal error: ID for location '{name}' not found despite exists() being True.")
                         else:
-                            print(f"Internal error: ID for location '{name}' not found despite exists() being True.")
-                    else:
-                        print(f"Location '{name}' is not found in '{dataset_name}' dataset.")
+                            print(f"Location '{name}' is not found in '{dataset_name}' dataset.")
 
-                print("\nTotal locations found:", len(location_names))
-                print("Names:", location_names)
-                print("IDs:", location_ids)
+                    for loc_id in location_ids:
+                        timeseries_processor.link_location(timeseries_id, loc_id)
+
+                    print("Timeseries with the name `"+timeseries_name+"` in dataset `"+dataset_name+"` was created for these locations:", location_names)
+
+
+                else:
+                    print("Timeseries with the name `"+timeseries_name+"` already exist in `"+dataset_name+"` dataset")
+
+            else:
+                print("Dataset with the name `"+dataset_name+"` is not found in database")
+        else:
+            print("No dataset found in folder `datasets` with the name `"+dataset_name+"`")
+
+    case "delete-timeseries":
+        dataset_name = input("Dataset name: ").strip()
+        if DatasetParser.fileExists(dataset_name):
+            dataset_processor = Dataset(db_connection)
+            timeseries_processor = Timeseries(db_connection)
+
+            if dataset_processor.exists(dataset_name):
+
+                dataset_id = dataset_processor.get_id(dataset_name)
+                timeseries_name = input("Timeseries name: ").strip()
+
+                if timeseries_processor.exists(timeseries_name, dataset_id):
+                    timeseries_processor.delete(timeseries_name, dataset_id)
+
+                    print("Timeseries with the name `"+timeseries_name+"` in dataset `"+dataset_name+"` is successfully deleted")
+                else:
+                    print("Timeseries with the name `"+timeseries_name+"` does not exist for `"+dataset_name+"` dataset")
 
             else:
                 print("Dataset with the name `"+dataset_name+"` is not found in database")
