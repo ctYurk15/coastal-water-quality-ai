@@ -27,4 +27,24 @@ class Timeseries (General):
 
         cursor.execute(sql, values)
         self.connection.commit()
+        cursor.close()        
+
+    def get_locations(self, timeseries_id):
+        """
+        Повертає список локацій (id і name), прив’язаних до timeseries_id.
+        """
+        cursor = self.connection.cursor(dictionary=True)
+
+        sql = """
+            SELECT l.id, l.name
+            FROM timeseries_locations tl
+            JOIN locations l ON tl.location_id = l.id
+            WHERE tl.timeseries_id = %s
+        """
+
+        cursor.execute(sql, (timeseries_id,))
+        rows = cursor.fetchall()
         cursor.close()
+
+        # Повертається список словників: [{'id': 1, 'name': 'Kyiv'}, ...]
+        return rows

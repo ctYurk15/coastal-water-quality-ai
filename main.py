@@ -5,6 +5,7 @@ from database.location import *
 from database.timeseries import *
 from dotenv import load_dotenv
 import os
+import pandas as pd
 
 # load database credentials from .env
 load_dotenv()
@@ -127,6 +128,74 @@ match action:
                 print("Dataset with the name `"+dataset_name+"` is not found in database")
         else:
             print("No dataset found in folder `datasets` with the name `"+dataset_name+"`")
+
+
+    case "process-timeseries":
+        dataset_name = input("Dataset name: ").strip()
+
+        if DatasetParser.fileExists(dataset_name):
+            dataset_processor = Dataset(db_connection)
+            timeseries_processor = Timeseries(db_connection)
+
+            if dataset_processor.exists(dataset_name):
+                dataset_id = dataset_processor.get_id(dataset_name)
+                timeseries_name = input("Timeseries name: ").strip()
+
+                if timeseries_processor.exists(timeseries_name, dataset_id):
+                    timeseries_id = timeseries_processor.get_id(timeseries_name, dataset_id)
+                    locations = timeseries_processor.get_locations(timeseries_id)
+
+                    print("Ok, generating global timeseries per phenomenon...")
+
+                    # === Load dataset file ===
+                    CSV_PATH = os.path.join("datasets", dataset_name)
+                    DATE_COLUMN = "phenomenonTimeSamplingDate"
+
+                    df = pd.read_csv(CSV_PATH, low_memory=False)
+                    df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN], format="%Y%m%d", errors="coerce")
+                    df = df.dropna(subset=[DATE_COLUMN])
+                    df["resultObservedValue"] = pd.to_numeric(df["resultObservedValue"], errors="coerce")
+                    df = df.dropna(subset=["resultObservedValue"])
+
+                    # === Відфільтруємо по дозволених локаціях ===
+                    allowed_location_names = [loc["name"] for loc in locations]
+                    df = df[df["monitoringSiteIdentifier"].isin(allowed_location_names)]
+
+                    if df.empty:
+                        print("No data found for selected locations.")
+                        exit()
+
+                    parameters = df["observedPropertyDeterminandLabel"].dropna().unique()
+
+                    OUTPUT_DIR = os.path.join("timeseries", f"{timeseries_id}_{timeseries_name}")
+                    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+                    for param in parameters:
+                        param_df = df[df["observedPropertyDeterminandLabel"] == param]
+
+                        ts = (
+                            param_df
+                            .groupby(DATE_COLUMN)["resultObservedValue"]
+                            .mean()
+                            .reset_index()
+                            .rename(columns={"resultObservedValue": "value"})
+                        )
+
+                        safe_name = param.replace('/', '_').replace(' ', '_').replace(':', '_')
+                        filename = f"{timeseries_id}_{timeseries_name}_{safe_name}.csv"
+                        output_path = os.path.join(OUTPUT_DIR, filename)
+
+                        ts.to_csv(output_path, index=False)
+                        print(f"Saved: {output_path} ({len(ts)} rows)")
+
+                    print("All aggregated timeseries saved in:", OUTPUT_DIR)
+
+                else:
+                    print(f"Timeseries '{timeseries_name}' not found for dataset '{dataset_name}'")
+            else:
+                print(f"Dataset '{dataset_name}' not found in database")
+        else:
+            print(f"No dataset file found in 'datasets/' with the name '{dataset_name}.csv'")
 
     case _:
         print("What?")
