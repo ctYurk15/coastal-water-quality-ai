@@ -6,6 +6,8 @@ from database.timeseries import *
 from dotenv import load_dotenv
 import os
 import pandas as pd
+from prophet import Prophet
+import matplotlib.pyplot as plt
 
 # load database credentials from .env
 load_dotenv()
@@ -28,11 +30,12 @@ match action:
         dataset_name = input("Dataset name (should be in datasets/ folder): ").strip()
         if DatasetParser.fileExists(dataset_name):
             dataset_processor = Dataset(db_connection)
-            location_processor = Location(db_connection)
 
             if not dataset_processor.exists(dataset_name):
                 dataset_id = dataset_processor.insert(dataset_name)
                 dataset_data = DatasetParser.getData(dataset_name)
+
+                location_processor = Location(db_connection)
 
                 for loc in dataset_data["locations"]:
                     location_processor.insert(loc, dataset_id)
@@ -129,7 +132,6 @@ match action:
         else:
             print("No dataset found in folder `datasets` with the name `"+dataset_name+"`")
 
-
     case "process-timeseries":
         dataset_name = input("Dataset name: ").strip()
 
@@ -190,6 +192,116 @@ match action:
 
                     print("All aggregated timeseries saved in:", OUTPUT_DIR)
 
+                else:
+                    print(f"Timeseries '{timeseries_name}' not found for dataset '{dataset_name}'")
+            else:
+                print(f"Dataset '{dataset_name}' not found in database")
+        else:
+            print(f"No dataset file found in 'datasets/' with the name '{dataset_name}.csv'")
+ 
+    case "predict-timeseries-property":
+        TRAIN_START = "2014-01-07"
+        TRAIN_END   = "2021-12-31"
+        FORECAST_START = "2022-01-01"
+        FORECAST_END   = "2022-12-28"
+
+        # === User input ===
+        dataset_name = input("Dataset name: ").strip()
+
+        if DatasetParser.fileExists(dataset_name):
+            dataset_processor = Dataset(db_connection)
+            timeseries_processor = Timeseries(db_connection)
+
+            if dataset_processor.exists(dataset_name):
+                dataset_id = dataset_processor.get_id(dataset_name)
+                timeseries_name = input("Timeseries name: ").strip()
+
+                if timeseries_processor.exists(timeseries_name, dataset_id):
+                    timeseries_id = timeseries_processor.get_id(timeseries_name, dataset_id)
+
+                    property_name = input("Property name: ").strip()
+                    property_name = property_name.replace('/', '_').replace(' ', '_').replace(':', '_')
+                    timeseries_prefix = str(timeseries_id) + "_" + timeseries_name
+
+                    # === Path to CSV ===
+                    property_timeseries_path = f'timeseries/{timeseries_prefix}/{timeseries_prefix}_{property_name}.csv'
+
+                    if os.path.isfile(property_timeseries_path):
+                        print('File found, running forecast...')
+
+                        # === Load and prepare ===
+                        try:
+                            df = pd.read_csv(property_timeseries_path, parse_dates=["phenomenonTimeSamplingDate"])
+                        except Exception as e:
+                            print(f"Failed to read file: {e}")
+                            exit()
+
+                        df = df.rename(columns={
+                            "phenomenonTimeSamplingDate": "ds",
+                            "value": "y"
+                        })
+
+                        df = df[df["y"] > 0]
+                        train_df = df[(df["ds"] >= TRAIN_START) & (df["ds"] <= TRAIN_END)]
+
+                        if train_df.shape[0] < 5:
+                            print("Not enough training data.")
+                            exit()
+
+                        # === Train model ===
+                        model = Prophet()
+                        model.fit(train_df)
+
+                        # === Forecast future ===
+                        forecast_dates = pd.date_range(start=FORECAST_START, end=FORECAST_END)
+                        future = pd.concat([
+                            train_df[["ds"]],
+                            pd.DataFrame({"ds": forecast_dates})
+                        ]).drop_duplicates().reset_index(drop=True)
+
+                        forecast = model.predict(future)
+                        forecast_range = forecast[
+                            (forecast["ds"] >= FORECAST_START) &
+                            (forecast["ds"] <= FORECAST_END)
+                        ]
+
+                        # === Фактичні дані в періоді прогнозу ===
+                        # === Фільтруємо прогноз і фактичні значення лише для періоду передбачення ===
+                        actual_forecast_df = df[(df["ds"] >= FORECAST_START) & (df["ds"] <= FORECAST_END)]
+                        predicted_df = forecast[(forecast["ds"] >= FORECAST_START) & (forecast["ds"] <= FORECAST_END)]
+
+                        # === Перевірка на наявність даних ===
+                        if actual_forecast_df.empty or predicted_df.empty:
+                            print("Not enough data in forecast period to plot comparison.")
+                            exit()
+
+                        # === Побудова простого графіка: реальне vs прогноз ===
+                        plt.figure(figsize=(10, 6))
+
+                        plt.plot(predicted_df["ds"], predicted_df["yhat"], label="Predicted", color="blue")
+                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], label="Actual", color="red")
+
+                        plt.title(f"Forecast vs Real ({property_name})\n{FORECAST_START} to {FORECAST_END}")
+                        plt.xlabel("Date")
+                        plt.ylabel("Value")
+                        plt.legend()
+                        plt.tight_layout()  
+
+                        # === Збереження через fig ===
+                        fig = plt.gcf()
+
+                        # === Save ===
+                        forecast_output_dir = os.path.join("forecasts", timeseries_prefix)
+                        os.makedirs(forecast_output_dir, exist_ok=True)
+                        output_filename = f"{timeseries_prefix}_{property_name}_{TRAIN_START}_to_{FORECAST_END}_forecast.png"
+                        output_path = os.path.join(forecast_output_dir, output_filename)
+                        fig.savefig(output_path)
+                        plt.close()
+
+                        print(f"Forecast saved to: {output_path}")
+
+                    else:
+                        print(f"Parameter '{property_name}' is not found in timeseries '{timeseries_name}' of dataset '{dataset_name}'")
                 else:
                     print(f"Timeseries '{timeseries_name}' not found for dataset '{dataset_name}'")
             else:
