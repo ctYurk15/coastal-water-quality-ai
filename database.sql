@@ -29,3 +29,18 @@ CREATE TABLE  IF NOT EXISTS `timeseries_locations`
     FOREIGN KEY (`timeseries_id`) REFERENCES `timeseries`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`location_id`) REFERENCES `locations`(`id`) ON DELETE CASCADE
 )
+
+CREATE TABLE IF NOT EXISTS `predictions`
+(
+    `id` INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    `timeseries_id` INT NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `property_name` VARCHAR(255) NOT NULL,
+    `train_date_from` DATE NOT NULL,
+    `train_date_to` DATE NOT NULL,
+    `forecast_date_from` DATE NOT NULL,
+    `forecast_date_to` DATE NOT NULL,
+    `forecast_path` VARCHAR(255) NOT NULL,
+    `created_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`timeseries_id`) REFERENCES `timeseries`(`id`) ON DELETE CASCADE
+)

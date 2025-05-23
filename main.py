@@ -3,11 +3,26 @@ from actions.dataset_parser import *
 from database.dataset import *
 from database.location import *
 from database.timeseries import *
+from database.predictions import *
 from dotenv import load_dotenv
 import os
 import pandas as pd
 from prophet import Prophet
 import matplotlib.pyplot as plt
+from datetime import datetime
+import hashlib
+
+def is_valid_date_format(date_str):
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+def generate_filename(length=32):
+    random_bytes = os.urandom(16)
+    hash_hex = hashlib.sha1(random_bytes).hexdigest()
+    return hash_hex[:length]
 
 # load database credentials from .env
 load_dotenv()
@@ -200,10 +215,33 @@ match action:
             print(f"No dataset file found in 'datasets/' with the name '{dataset_name}.csv'")
  
     case "predict-timeseries-property":
+
+        """
         TRAIN_START = "2014-01-07"
         TRAIN_END   = "2021-12-31"
         FORECAST_START = "2022-01-01"
         FORECAST_END   = "2022-12-28"
+        """
+
+        train_start = input("Training start date: ").strip()
+        train_end = input("Training end date: ").strip()
+        forecast_start = input("Forecast start date: ").strip()
+        forecast_end = input("Forecast end date: ").strip()
+
+        date_inputs = {
+            "Training start date": train_start,
+            "Training end date": train_end,
+            "Forecast start date": forecast_start,
+            "Forecast end date": forecast_end
+        }
+
+        invalid = [label for label, value in date_inputs.items() if not is_valid_date_format(value)]
+
+        if invalid:
+            print("The following dates are in invalid format (expected YYYY-MM-DD):")
+            for label in invalid:
+                print(f" - {label}: {date_inputs[label]}")
+            exit()
 
         # === User input ===
         dataset_name = input("Dataset name: ").strip()
@@ -227,6 +265,9 @@ match action:
                     property_timeseries_path = f'timeseries/{timeseries_prefix}/{timeseries_prefix}_{property_name}.csv'
 
                     if os.path.isfile(property_timeseries_path):
+
+                        prediction_name = input("Prediction name: ")
+
                         print('File found, running forecast...')
 
                         # === Load and prepare ===
@@ -242,7 +283,7 @@ match action:
                         })
 
                         df = df[df["y"] > 0]
-                        train_df = df[(df["ds"] >= TRAIN_START) & (df["ds"] <= TRAIN_END)]
+                        train_df = df[(df["ds"] >= train_start) & (df["ds"] <= train_end)]
 
                         if train_df.shape[0] < 5:
                             print("Not enough training data.")
@@ -253,7 +294,7 @@ match action:
                         model.fit(train_df)
 
                         # === Forecast future ===
-                        forecast_dates = pd.date_range(start=FORECAST_START, end=FORECAST_END)
+                        forecast_dates = pd.date_range(start=forecast_start, end=forecast_end)
                         future = pd.concat([
                             train_df[["ds"]],
                             pd.DataFrame({"ds": forecast_dates})
@@ -261,44 +302,77 @@ match action:
 
                         forecast = model.predict(future)
                         forecast_range = forecast[
-                            (forecast["ds"] >= FORECAST_START) &
-                            (forecast["ds"] <= FORECAST_END)
+                            (forecast["ds"] >= forecast_start) &
+                            (forecast["ds"] <= forecast_end)
                         ]
 
                         # === Фактичні дані в періоді прогнозу ===
                         # === Фільтруємо прогноз і фактичні значення лише для періоду передбачення ===
-                        actual_forecast_df = df[(df["ds"] >= FORECAST_START) & (df["ds"] <= FORECAST_END)]
-                        predicted_df = forecast[(forecast["ds"] >= FORECAST_START) & (forecast["ds"] <= FORECAST_END)]
+                        actual_forecast_df = df[(df["ds"] >= forecast_start) & (df["ds"] <= forecast_end)]
+                        predicted_df = forecast[(forecast["ds"] >= forecast_start) & (forecast["ds"] <= forecast_end)]
 
                         # === Перевірка на наявність даних ===
                         if actual_forecast_df.empty or predicted_df.empty:
                             print("Not enough data in forecast period to plot comparison.")
                             exit()
 
-                        # === Побудова простого графіка: реальне vs прогноз ===
+                        # === Папка для збереження ===
+                        filename = generate_filename()
+                        forecast_output_dir = os.path.join("forecasts", timeseries_prefix, filename)
+                        os.makedirs(forecast_output_dir, exist_ok=True)
+
+                        # === 1. Графік тільки реальних значень ===
                         plt.figure(figsize=(10, 6))
-
-                        plt.plot(predicted_df["ds"], predicted_df["yhat"], label="Predicted", color="blue")
-                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], label="Actual", color="red")
-
-                        plt.title(f"Forecast vs Real ({property_name})\n{FORECAST_START} to {FORECAST_END}")
+                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], color="red", label="Actual")
+                        plt.title(f"Actual Data ({property_name})\n{forecast_start} to {forecast_end}")
                         plt.xlabel("Date")
                         plt.ylabel("Value")
                         plt.legend()
-                        plt.tight_layout()  
-
-                        # === Збереження через fig ===
-                        fig = plt.gcf()
-
-                        # === Save ===
-                        forecast_output_dir = os.path.join("forecasts", timeseries_prefix)
-                        os.makedirs(forecast_output_dir, exist_ok=True)
-                        output_filename = f"{timeseries_prefix}_{property_name}_{TRAIN_START}_to_{FORECAST_END}_forecast.png"
-                        output_path = os.path.join(forecast_output_dir, output_filename)
-                        fig.savefig(output_path)
+                        plt.tight_layout()
+                        actual_path = os.path.join(forecast_output_dir, "actual.png")
+                        plt.savefig(actual_path)
                         plt.close()
 
-                        print(f"Forecast saved to: {output_path}")
+                        # === 2. Графік тільки прогнозу ===
+                        plt.figure(figsize=(10, 6))
+                        plt.plot(predicted_df["ds"], predicted_df["yhat"], color="blue", label="Predicted")
+                        plt.title(f"Predicted Data ({property_name})\n{forecast_start} to {forecast_end}")
+                        plt.xlabel("Date")
+                        plt.ylabel("Value")
+                        plt.legend()
+                        plt.tight_layout()
+                        predicted_path = os.path.join(forecast_output_dir, "predicted.png")
+                        plt.savefig(predicted_path)
+                        plt.close()
+
+                        # === 3. Об'єднаний графік ===
+                        plt.figure(figsize=(10, 6))
+                        plt.plot(predicted_df["ds"], predicted_df["yhat"], label="Predicted", color="blue")
+                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], label="Actual", color="red")
+                        plt.title(f"Forecast vs Real ({property_name})\n{forecast_start} to {forecast_end}")
+                        plt.xlabel("Date")
+                        plt.ylabel("Value")
+                        plt.legend()
+                        plt.tight_layout()
+                        combined_path = os.path.join(forecast_output_dir, "combined.png")
+                        fig = plt.gcf()
+                        plt.savefig(combined_path)
+                        plt.close()
+
+                        # === Збереження запису в БД ===
+                        predictions_processor = Predictions(db_connection)
+                        predictions_processor.insert(
+                            timeseries_id,
+                            prediction_name,
+                            property_name,
+                            train_start,
+                            train_end,
+                            forecast_start,
+                            forecast_end,
+                            filename
+                        )
+
+                        print(f"Forecasts saved to: {forecast_output_dir}")
 
                     else:
                         print(f"Parameter '{property_name}' is not found in timeseries '{timeseries_name}' of dataset '{dataset_name}'")
