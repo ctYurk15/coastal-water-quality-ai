@@ -6,7 +6,9 @@ class Predictions (General):
     columns = [
         "timeseries_id", 
         "name", 
-        "property_name", 
+        "properties", 
+        "forecast_property",
+        "forecast_correct_points_percent",
         "train_date_from", 
         "train_date_to", 
         "forecast_date_from", 
@@ -14,11 +16,13 @@ class Predictions (General):
         "forecast_path"
     ]
 
-    def insert(self, timeseries_id, name, property_name, train_date_from, train_date_to, forecast_date_from, forecast_date_to, forecast_path):
+    def insert(self, timeseries_id, name, properties, forecast_property, forecast_correct_points_percent, train_date_from, train_date_to, forecast_date_from, forecast_date_to, forecast_path):
         return super().insert({
             "timeseries_id" : timeseries_id,
             "name" : name,
-            "property_name" : property_name,
+            "properties" : properties,
+            "forecast_property": forecast_property,
+            "forecast_correct_points_percent": round(forecast_correct_points_percent, 5),
             "train_date_from" : train_date_from,
             "train_date_to" : train_date_to,
             "forecast_date_from" : forecast_date_from,

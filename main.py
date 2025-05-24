@@ -11,6 +11,8 @@ from prophet import Prophet
 import matplotlib.pyplot as plt
 from datetime import datetime
 import hashlib
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import numpy as np
 
 def is_valid_date_format(date_str):
     try:
@@ -255,127 +257,179 @@ match action:
                 timeseries_name = input("Timeseries name: ").strip()
 
                 if timeseries_processor.exists(timeseries_name, dataset_id):
-                    timeseries_id = timeseries_processor.get_id(timeseries_name, dataset_id)
 
-                    property_name = input("Property name: ").strip()
-                    property_name = property_name.replace('/', '_').replace(' ', '_').replace(':', '_')
+                    timeseries_id = timeseries_processor.get_id(timeseries_name, dataset_id)
                     timeseries_prefix = str(timeseries_id) + "_" + timeseries_name
 
-                    # === Path to CSV ===
-                    property_timeseries_path = f'timeseries/{timeseries_prefix}/{timeseries_prefix}_{property_name}.csv'
+                    # === Збір і перевірка параметрів ===
+                    property_dataframes = {}
+                    print("Enter property names one by one (press ENTER without input to finish):")
 
-                    if os.path.isfile(property_timeseries_path):
+                    while True:
+                        user_input = input("Property name: ").strip()
+                        if user_input == "":
+                            break
 
-                        prediction_name = input("Prediction name: ")
+                        cleaned_name = user_input.replace('/', '_').replace(' ', '_').replace(':', '_')
+                        path = f'timeseries/{timeseries_prefix}/{timeseries_prefix}_{cleaned_name}.csv'
 
-                        print('File found, running forecast...')
+                        if os.path.isfile(path):
+                            try:
+                                df = pd.read_csv(path, parse_dates=["phenomenonTimeSamplingDate"])
+                                df = df.rename(columns={"phenomenonTimeSamplingDate": "ds", "value": cleaned_name})
+                                property_dataframes[cleaned_name] = df[["ds", cleaned_name]]
+                                print(f"Added: {cleaned_name}")
+                            except Exception as e:
+                                print(f"Failed to load {cleaned_name}: {e}")
+                        else:
+                            print(f"Parameter '{cleaned_name}' not found. Try again.")
 
-                        # === Load and prepare ===
-                        try:
-                            df = pd.read_csv(property_timeseries_path, parse_dates=["phenomenonTimeSamplingDate"])
-                        except Exception as e:
-                            print(f"Failed to read file: {e}")
-                            exit()
+                    if not property_dataframes:
+                        print("No valid parameters provided.")
+                        exit()
 
-                        df = df.rename(columns={
-                            "phenomenonTimeSamplingDate": "ds",
-                            "value": "y"
-                        })
+                    # === Обираємо цільову змінну ===
+                    print("\nAvailable parameters:", ", ".join(property_dataframes.keys()))
+                    target = input("Enter the name of the parameter to predict (target): ").strip()
 
-                        df = df[df["y"] > 0]
-                        train_df = df[(df["ds"] >= train_start) & (df["ds"] <= train_end)]
+                    if target not in property_dataframes:
+                        print(f"'{target}' not in selected parameters.")
+                        exit()
 
-                        if train_df.shape[0] < 5:
-                            print("Not enough training data.")
-                            exit()
+                    # === Об'єднуємо всі дані по 'ds' ===
+                    from functools import reduce
+                    merged_df = reduce(lambda left, right: pd.merge(left, right, on="ds", how="inner"), property_dataframes.values())
 
-                        # === Train model ===
-                        model = Prophet()
-                        model.fit(train_df)
+                    # === Відкидаємо нульові/від’ємні цільові значення
+                    merged_df = merged_df[merged_df[target] > 0]
 
-                        # === Forecast future ===
-                        forecast_dates = pd.date_range(start=forecast_start, end=forecast_end)
-                        future = pd.concat([
-                            train_df[["ds"]],
-                            pd.DataFrame({"ds": forecast_dates})
-                        ]).drop_duplicates().reset_index(drop=True)
+                    # === Відокремлюємо train/predict
+                    train_df = merged_df[(merged_df["ds"] >= train_start) & (merged_df["ds"] <= train_end)]
+                    predict_dates = pd.date_range(start=forecast_start, end=forecast_end)
 
-                        forecast = model.predict(future)
-                        forecast_range = forecast[
-                            (forecast["ds"] >= forecast_start) &
-                            (forecast["ds"] <= forecast_end)
-                        ]
+                    if train_df.shape[0] < 5:
+                        print("Not enough training data.")
+                        exit()
 
-                        # === Фактичні дані в періоді прогнозу ===
-                        # === Фільтруємо прогноз і фактичні значення лише для періоду передбачення ===
-                        actual_forecast_df = df[(df["ds"] >= forecast_start) & (df["ds"] <= forecast_end)]
-                        predicted_df = forecast[(forecast["ds"] >= forecast_start) & (forecast["ds"] <= forecast_end)]
+                    # === Створення моделі Prophet
+                    model = Prophet(
+                        yearly_seasonality=False,
+                        weekly_seasonality=False,
+                        daily_seasonality=False
+                    )
+                    for regressor in property_dataframes:
+                        if regressor != target:
+                            model.add_regressor(regressor)
 
-                        # === Перевірка на наявність даних ===
-                        if actual_forecast_df.empty or predicted_df.empty:
-                            print("Not enough data in forecast period to plot comparison.")
-                            exit()
+                    # === Переіменування target → y
+                    train_df = train_df.rename(columns={target: "y"})
 
-                        # === Папка для збереження ===
-                        filename = generate_filename()
-                        forecast_output_dir = os.path.join("forecasts", timeseries_prefix, filename)
-                        os.makedirs(forecast_output_dir, exist_ok=True)
+                    # === Навчання
+                    model.fit(train_df)
 
-                        # === 1. Графік тільки реальних значень ===
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], color="red", label="Actual")
-                        plt.title(f"Actual Data ({property_name})\n{forecast_start} to {forecast_end}")
-                        plt.xlabel("Date")
-                        plt.ylabel("Value")
-                        plt.legend()
-                        plt.tight_layout()
-                        actual_path = os.path.join(forecast_output_dir, "actual.png")
-                        plt.savefig(actual_path)
-                        plt.close()
+                    # === Побудова future dataframe
+                    future = pd.DataFrame({"ds": predict_dates})
+                    for reg in property_dataframes:
+                        if reg != target:
+                            # беремо з основного об’єднаного датасету регресори для майбутніх дат
+                            future = pd.merge(future, merged_df[["ds", reg]], on="ds", how="left")
 
-                        # === 2. Графік тільки прогнозу ===
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(predicted_df["ds"], predicted_df["yhat"], color="blue", label="Predicted")
-                        plt.title(f"Predicted Data ({property_name})\n{forecast_start} to {forecast_end}")
-                        plt.xlabel("Date")
-                        plt.ylabel("Value")
-                        plt.legend()
-                        plt.tight_layout()
-                        predicted_path = os.path.join(forecast_output_dir, "predicted.png")
-                        plt.savefig(predicted_path)
-                        plt.close()
+                    # === Очистка future: видалення рядків з NaN у регресорах
+                    required_columns = [col for col in future.columns if col != "ds"]
+                    future = future.dropna(subset=required_columns)
 
-                        # === 3. Об'єднаний графік ===
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(predicted_df["ds"], predicted_df["yhat"], label="Predicted", color="blue")
-                        plt.plot(actual_forecast_df["ds"], actual_forecast_df["y"], label="Actual", color="red")
-                        plt.title(f"Forecast vs Real ({property_name})\n{forecast_start} to {forecast_end}")
-                        plt.xlabel("Date")
-                        plt.ylabel("Value")
-                        plt.legend()
-                        plt.tight_layout()
-                        combined_path = os.path.join(forecast_output_dir, "combined.png")
-                        fig = plt.gcf()
-                        plt.savefig(combined_path)
-                        plt.close()
+                    # === Прогноз
+                    forecast = model.predict(future)
 
-                        # === Збереження запису в БД ===
-                        predictions_processor = Predictions(db_connection)
-                        predictions_processor.insert(
-                            timeseries_id,
-                            prediction_name,
-                            property_name,
-                            train_start,
-                            train_end,
-                            forecast_start,
-                            forecast_end,
-                            filename
-                        )
+                    # === Побудова графіків
+                    output_dir = os.path.join("forecasts", timeseries_prefix, generate_filename())
+                    os.makedirs(output_dir, exist_ok=True)
 
-                        print(f"Forecasts saved to: {forecast_output_dir}")
+                    # 1. Реальні значення
+                    actual_df = merged_df[(merged_df["ds"] >= forecast_start) & (merged_df["ds"] <= forecast_end)]
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(actual_df["ds"], actual_df[target], color="red", label="Actual")
+                    plt.title(f"Actual Data ({target})")
+                    plt.xlabel("Date")
+                    plt.ylabel("Value")
+                    plt.legend()
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, "actual.png"))
+                    plt.close()
 
-                    else:
-                        print(f"Parameter '{property_name}' is not found in timeseries '{timeseries_name}' of dataset '{dataset_name}'")
+                    # 2. Прогнозовані значення
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(forecast["ds"], forecast["yhat"], color="blue", label="Predicted")
+                    plt.title(f"Predicted Data ({target})")
+                    plt.xlabel("Date")
+                    plt.ylabel("Value")
+                    plt.legend()
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, "predicted.png"))
+                    plt.close()
+
+                    # === Об'єднуємо для аналізу
+                    merged_eval = pd.merge(
+                        actual_df[["ds", target]],
+                        forecast[["ds", "yhat"]],
+                        on="ds",
+                        how="inner"
+                    )
+
+                    # === Обчислюємо помилки
+                    merged_eval["abs_error"] = abs(merged_eval[target] - merged_eval["yhat"])
+                    merged_eval["pct_error"] = merged_eval["abs_error"] / (merged_eval[target].replace(0, np.nan)) * 100  # уникаємо ділення на 0
+
+                    # === Порог точності (%)
+                    threshold_pct = 20  # Точка вважається "хорошою", якщо похибка ≤ 20%
+                    merged_eval["good"] = merged_eval["pct_error"] <= threshold_pct
+                    good_ratio = merged_eval["good"].sum() / merged_eval.shape[0] * 100
+                    good_text = f"Good predictions: {good_ratio:.1f}% ≤ {threshold_pct}% error"
+
+                    # === Combined графік з точками "good"
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(merged_eval["ds"], merged_eval["yhat"], label="Predicted", color="blue")
+                    plt.plot(merged_eval["ds"], merged_eval[target], label="Actual", color="red")
+
+                    # Додаємо "хороші" точки
+                    good_points = merged_eval[merged_eval["good"]]
+                    plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
+
+                    plt.title(f"Forecast vs Real ({target})\n{good_text}")
+                    plt.xlabel("Date")
+                    plt.ylabel("Value")
+                    plt.legend()
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, "combined.png"))
+                    plt.close()
+
+                    # === 4. Error-графік: абсолютна похибка
+                    plt.figure(figsize=(10, 4))
+                    plt.plot(merged_eval["ds"], merged_eval["abs_error"], color="purple", label="|y - ŷ|")
+                    plt.title(f"Absolute Error per Date ({target})")
+                    plt.xlabel("Date")
+                    plt.ylabel("Absolute Error")
+                    plt.tight_layout()
+                    plt.legend()
+                    plt.savefig(os.path.join(output_dir, "error.png"))
+                    plt.close()
+
+                    # === Збереження в БД
+                    predictions_processor = Predictions(db_connection)
+                    predictions_processor.insert(
+                        timeseries_id,
+                        input("Prediction name: "),
+                        ",".join(property_dataframes.keys()),
+                        target, 
+                        good_ratio,
+                        train_start,
+                        train_end,
+                        forecast_start,
+                        forecast_end,
+                        output_dir
+                    )
+
+                    print(f"Forecast for '{target}' saved in {output_dir}")
                 else:
                     print(f"Timeseries '{timeseries_name}' not found for dataset '{dataset_name}'")
             else:
