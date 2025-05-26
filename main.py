@@ -13,6 +13,7 @@ from datetime import datetime
 import hashlib
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import numpy as np
+import matplotlib.dates as mdates
 
 def is_valid_date_format(date_str):
     try:
@@ -362,9 +363,13 @@ match action:
 
                     # === Обмеження на основі реальних значень
                     historical_max = actual_df[target].max()
-                    clip_upper = historical_max
+                    historical_min = actual_df[target].min()
 
-                    forecast["yhat"] = forecast["yhat"].clip(upper=clip_upper)
+                    clip_upper = historical_max
+                    clip_lower = historical_min
+
+                    # Обмеження прогнозу зверху і знизу
+                    forecast["yhat"] = forecast["yhat"].clip(lower=clip_lower, upper=clip_upper)
 
                     # === Об'єднуємо для аналізу
                     merged_eval = pd.merge(
@@ -406,8 +411,11 @@ match action:
                     os.makedirs(output_dir, exist_ok=True)
 
                     # 1. Реальні значення
-                    plt.figure(figsize=(10, 6))
+                    plt.figure(figsize=(20, 10))
                     plt.plot(actual_df["ds"], actual_df[target], color="red", label="Actual")
+                    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                    plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+                    plt.xticks(rotation=45)
                     plt.title(f"Actual Data ({target})")
                     plt.xlabel("Date")
                     plt.ylabel("Value")
@@ -418,8 +426,11 @@ match action:
                     plt.close()
 
                     # 2. Прогнозовані значення
-                    plt.figure(figsize=(10, 6))
+                    plt.figure(figsize=(20, 10))
                     plt.plot(forecast["ds"], forecast["yhat"], color="blue", label="Predicted")
+                    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                    plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+                    plt.xticks(rotation=45)
                     plt.title(f"Predicted Data ({target})")
                     plt.xlabel("Date")
                     plt.ylabel("Value")
@@ -442,9 +453,12 @@ match action:
                     """
                     good_points = merged_eval[merged_eval["good"]]
                     
-                    plt.figure(figsize=(10, 6))
+                    plt.figure(figsize=(20, 10))
                     plt.plot(forecast["ds"], forecast["yhat"], label="Predicted", color="blue")
                     plt.plot(actual_df["ds"], actual_df[target], label="Actual", color="red")
+                    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                    plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+                    plt.xticks(rotation=45)
                     plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
                     plt.title(f"Forecast vs Real ({target})\n{good_text}\nLimit: {clip_upper:.2f}")
                     plt.xlabel("Date")
@@ -456,8 +470,11 @@ match action:
                     plt.close()
 
                     # === 4. Error-графік: абсолютна похибка
-                    plt.figure(figsize=(10, 4))
+                    plt.figure(figsize=(20, 10))
                     plt.plot(merged_eval["ds"], merged_eval["abs_error"], color="purple", label="|y - ŷ|")
+                    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+                    plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+                    plt.xticks(rotation=45)
                     plt.title(f"Absolute Error per Date ({target})")
                     plt.xlabel("Date")
                     plt.ylabel("Absolute Error")
