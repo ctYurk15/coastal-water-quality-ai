@@ -351,10 +351,18 @@ match action:
                     # === Обрізання по 95-му процентилю
                     #clip_upper = np.percentile(forecast["yhat"], 95)
                     #forecast["yhat"] = forecast["yhat"].clip(upper=clip_upper)
+
+                    # === Окреме завантаження тільки target для actual_df
+                    #actual_df = merged_df[(merged_df["ds"] >= forecast_start) & (merged_df["ds"] <= forecast_end)]
+                    target_path = f'timeseries/{timeseries_prefix}/{timeseries_prefix}_{target}.csv'
+                    actual_df = pd.read_csv(target_path, parse_dates=["phenomenonTimeSamplingDate"])
+                    actual_df = actual_df.rename(columns={"phenomenonTimeSamplingDate": "ds", "value": target})
+                    actual_df = actual_df[["ds", target]]
+                    actual_df = actual_df[(actual_df["ds"] >= forecast_start) & (actual_df["ds"] <= forecast_end)]
+
                     # === Обмеження на основі реальних значень
-                    actual_df = merged_df[(merged_df["ds"] >= forecast_start) & (merged_df["ds"] <= forecast_end)]
                     historical_max = actual_df[target].max()
-                    clip_upper = historical_max * 3
+                    clip_upper = historical_max
 
                     forecast["yhat"] = forecast["yhat"].clip(upper=clip_upper)
 
@@ -375,15 +383,6 @@ match action:
                     merged_eval["good"] = merged_eval["pct_error"] <= threshold_pct
                     good_ratio = merged_eval["good"].sum() / merged_eval.shape[0] * 100
                     good_text = f"Good predictions: {good_ratio:.1f}% ≤ {threshold_pct}% error"
-
-                    # === Combined графік з точками "good"
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(merged_eval["ds"], merged_eval["yhat"], label="Predicted", color="blue")
-                    plt.plot(merged_eval["ds"], merged_eval[target], label="Actual", color="red")
-
-                    # Додаємо "хороші" точки
-                    good_points = merged_eval[merged_eval["good"]]
-                    plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
 
                     # === Збереження в БД
                     folder_name = generate_filename()
@@ -431,6 +430,22 @@ match action:
                     plt.close()
 
                     # === 3. Comparison between preiction and reality
+
+                    """
+                    # === Combined графік з точками "good"
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(merged_eval["ds"], merged_eval["yhat"], label="Predicted", color="blue")
+                    plt.plot(merged_eval["ds"], merged_eval[target], label="Actual", color="red")
+
+                    # Додаємо "хороші" точки
+                    plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
+                    """
+                    good_points = merged_eval[merged_eval["good"]]
+                    
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(forecast["ds"], forecast["yhat"], label="Predicted", color="blue")
+                    plt.plot(actual_df["ds"], actual_df[target], label="Actual", color="red")
+                    plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
                     plt.title(f"Forecast vs Real ({target})\n{good_text}\nLimit: {clip_upper:.2f}")
                     plt.xlabel("Date")
                     plt.ylabel("Value")
