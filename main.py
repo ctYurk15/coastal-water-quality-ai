@@ -341,32 +341,22 @@ match action:
                     # === Прогноз
                     forecast = model.predict(future)
 
-                    # === Побудова графіків
-                    output_dir = os.path.join("forecasts", timeseries_prefix, generate_filename())
-                    os.makedirs(output_dir, exist_ok=True)
+                    # === Автоматичне обрізання піків у прогнозі ===
+                    yhat_values = forecast["yhat"]
+                    median = yhat_values.median()
+                    std = yhat_values.std()
 
-                    # 1. Реальні значення
+                    # Верхня межа: медіана + 3 стандартних відхилення
+                    #clip_upper = median + std
+                    # === Обрізання по 95-му процентилю
+                    #clip_upper = np.percentile(forecast["yhat"], 95)
+                    #forecast["yhat"] = forecast["yhat"].clip(upper=clip_upper)
+                    # === Обмеження на основі реальних значень
                     actual_df = merged_df[(merged_df["ds"] >= forecast_start) & (merged_df["ds"] <= forecast_end)]
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(actual_df["ds"], actual_df[target], color="red", label="Actual")
-                    plt.title(f"Actual Data ({target})")
-                    plt.xlabel("Date")
-                    plt.ylabel("Value")
-                    plt.legend()
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(output_dir, "actual.png"))
-                    plt.close()
+                    historical_max = actual_df[target].max()
+                    clip_upper = historical_max * 3
 
-                    # 2. Прогнозовані значення
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(forecast["ds"], forecast["yhat"], color="blue", label="Predicted")
-                    plt.title(f"Predicted Data ({target})")
-                    plt.xlabel("Date")
-                    plt.ylabel("Value")
-                    plt.legend()
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(output_dir, "predicted.png"))
-                    plt.close()
+                    forecast["yhat"] = forecast["yhat"].clip(upper=clip_upper)
 
                     # === Об'єднуємо для аналізу
                     merged_eval = pd.merge(
@@ -395,10 +385,57 @@ match action:
                     good_points = merged_eval[merged_eval["good"]]
                     plt.scatter(good_points["ds"], good_points["yhat"], color="green", s=20, label="Good points")
 
-                    plt.title(f"Forecast vs Real ({target})\n{good_text}")
+                    # === Збереження в БД
+                    folder_name = generate_filename()
+                    predictions_processor = Predictions(db_connection)
+                    prediction_id = predictions_processor.insert(
+                        timeseries_id,
+                        input("Prediction name: "),
+                        ",".join(property_dataframes.keys()),
+                        target, 
+                        good_ratio,
+                        train_start,
+                        train_end,
+                        forecast_start,
+                        forecast_end,
+                        folder_name
+                    )
+                    folder_name = str(prediction_id) + "_" + folder_name
+
+                    # === Побудова графіків
+                    output_dir = os.path.join("forecasts", timeseries_prefix, folder_name)
+                    os.makedirs(output_dir, exist_ok=True)
+
+                    # 1. Реальні значення
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(actual_df["ds"], actual_df[target], color="red", label="Actual")
+                    plt.title(f"Actual Data ({target})")
                     plt.xlabel("Date")
                     plt.ylabel("Value")
                     plt.legend()
+                    plt.grid(True)
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, "actual.png"))
+                    plt.close()
+
+                    # 2. Прогнозовані значення
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(forecast["ds"], forecast["yhat"], color="blue", label="Predicted")
+                    plt.title(f"Predicted Data ({target})")
+                    plt.xlabel("Date")
+                    plt.ylabel("Value")
+                    plt.legend()
+                    plt.grid(True)
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, "predicted.png"))
+                    plt.close()
+
+                    # === 3. Comparison between preiction and reality
+                    plt.title(f"Forecast vs Real ({target})\n{good_text}\nLimit: {clip_upper:.2f}")
+                    plt.xlabel("Date")
+                    plt.ylabel("Value")
+                    plt.legend()
+                    plt.grid(True)
                     plt.tight_layout()
                     plt.savefig(os.path.join(output_dir, "combined.png"))
                     plt.close()
@@ -411,25 +448,11 @@ match action:
                     plt.ylabel("Absolute Error")
                     plt.tight_layout()
                     plt.legend()
+                    plt.grid(True)
                     plt.savefig(os.path.join(output_dir, "error.png"))
                     plt.close()
 
-                    # === Збереження в БД
-                    predictions_processor = Predictions(db_connection)
-                    predictions_processor.insert(
-                        timeseries_id,
-                        input("Prediction name: "),
-                        ",".join(property_dataframes.keys()),
-                        target, 
-                        good_ratio,
-                        train_start,
-                        train_end,
-                        forecast_start,
-                        forecast_end,
-                        output_dir
-                    )
-
-                    print(f"Forecast for '{target}' saved in {output_dir}")
+                    print(f"Forecast for '{target}' saved in {output_dir}. Result: {good_ratio}%")
                 else:
                     print(f"Timeseries '{timeseries_name}' not found for dataset '{dataset_name}'")
             else:
